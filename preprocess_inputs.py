@@ -45,7 +45,9 @@ preprocessor = nfp.SmilesPreprocessor(
 
 if __name__ == '__main__':
             
-    cdf = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/cdf_spins.csv.gz')
+    cdf_spin = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/cdf_spins.csv.gz')
+    cdf_bv = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/cdf_buried_volume.csv.gz', index_col=0)
+    cdf = cdf_spin.merge(cdf_bv, on=['smiles', 'atom_index'], how='left')    
 
     # Get a shuffled list of unique SMILES
     cdf_smiles = cdf.smiles.unique()
@@ -68,6 +70,7 @@ if __name__ == '__main__':
             spin = idf.set_index('atom_index').sort_index().spin
             fractional_spin = spin.abs() / spin.abs().sum()
             input_dict['spin'] = fractional_spin.values
+            input_dict['bur_vol'] = idf.buried_vol.values            
             
             assert len(fractional_spin.values) == input_dict['n_atom']
 

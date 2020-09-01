@@ -2,6 +2,7 @@ import os
 import math
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow.keras import layers
 
 import nfp
@@ -14,7 +15,8 @@ from loss import AtomInfMask, KLWithLogits
 def parse_example(example):
     parsed = tf.io.parse_single_example(example, features={
         **preprocessor.tfrecord_features,
-        **{'spin': tf.io.FixedLenFeature([], dtype=tf.string)}})
+        **{'spin': tf.io.FixedLenFeature([], dtype=tf.string),
+           'bur_vol': tf.io.FixedLenFeature([], dtype=tf.string)}})
 
     # All of the array preprocessor features are serialized integer arrays
     for key, val in preprocessor.tfrecord_features.items():
@@ -22,25 +24,29 @@ def parse_example(example):
             parsed[key] = tf.io.parse_tensor(
                 parsed[key], out_type=preprocessor.output_types[key])
     
-    # Pop out the prediction target from the stored dictionary as a seperate input
+    # Pop out the prediction target from the stored dictionary as a seperate dict
     parsed['spin'] = tf.io.parse_tensor(parsed['spin'], out_type=tf.float64)
+    parsed['bur_vol'] = tf.io.parse_tensor(parsed['bur_vol'], out_type=tf.float64)
     
     spin = parsed.pop('spin')
+    bur_vol = parsed.pop('bur_vol')
+    targets = {'spin': spin, 'bur_vol': bur_vol}
     
-    return parsed, spin
+    return parsed, targets
+
 
 max_atoms = 80
 max_bonds = 100
 batch_size = 128
-atom_features = 128
-num_messages = 6
-
 
 # Here, we have to add the prediction target padding onto the input padding
-padded_shapes = (preprocessor.padded_shapes(max_atoms=None, max_bonds=None), [None])
+# Here, we have to add the prediction target padding onto the input padding
+padded_shapes = (preprocessor.padded_shapes(max_atoms=None, max_bonds=None),
+                 {'spin': [None], 'bur_vol': [None]})
 
 padding_values = (preprocessor.padding_values,
-                  tf.constant(np.nan, dtype=tf.float64))
+                  {'spin': tf.constant(np.nan, dtype=tf.float64),
+                   'bur_vol': tf.constant(np.nan, dtype=tf.float64)})
 
 num_train = len(np.load('split.npz', allow_pickle=True)['train'])
 
@@ -61,70 +67,55 @@ valid_dataset = tf.data.TFRecordDataset('tfrecords/valid.tfrecord.gz', compressi
     .prefetch(tf.data.experimental.AUTOTUNE)
 
 
+from model import build_embedding_model
+
+atom_embedding_model = build_embedding_model(preprocessor,
+                                             dropout=0.0,
+                                             atom_features=128,
+                                             num_messages=6,
+                                             num_heads=8,
+                                             name='atom_embedding_model')
+
+n_atom = layers.Input(shape=[], dtype=tf.int64, name='n_atom')
+atom_class = layers.Input(shape=[None], dtype=tf.int64, name='atom')
+bond_class = layers.Input(shape=[None], dtype=tf.int64, name='bond')
+connectivity = layers.Input(shape=[None, 2], dtype=tf.int64, name='connectivity')
+
+input_tensors = [atom_class, bond_class, connectivity, n_atom]
+
+atom_state, bond_state, global_state = atom_embedding_model(input_tensors)
+
+spin_bias = layers.Embedding(preprocessor.atom_classes, 1,
+                             name='spin_bias', mask_zero=True)(atom_class)
+
+bur_vol_bias =  layers.Embedding(preprocessor.atom_classes, 1,
+                                 name='bur_vol_bias', mask_zero=True)(atom_class)
+
+spin_pred = layers.Dense(1)(atom_state)
+spin_pred = layers.Add()([spin_pred, spin_bias])
+spin_pred = AtomInfMask(name='spin')(spin_pred)
+
+bur_vol_pred = layers.Dense(1, name='bur_vol_dense')(atom_state)
+bur_vol_pred = layers.Add(name='bur_vol')([bur_vol_pred, bur_vol_bias])
+
+model = tf.keras.Model(input_tensors, [spin_pred, bur_vol_pred])
+
+
 if __name__ == "__main__":
 
-    # Define keras model
-    atom_class = layers.Input(shape=[None], dtype=tf.int64, name='atom')
-    bond_class = layers.Input(shape=[None], dtype=tf.int64, name='bond')
-    connectivity = layers.Input(shape=[None, 2], dtype=tf.int64, name='connectivity')
-
-    input_tensors = [atom_class, bond_class, connectivity]
-
-    # Initialize the atom states
-    atom_state = layers.Embedding(preprocessor.atom_classes, atom_features,
-                                  name='atom_embedding', mask_zero=True)(atom_class)
-
-    # Initialize the bond states
-    bond_state = layers.Embedding(preprocessor.bond_classes, atom_features,
-                                  name='bond_embedding', mask_zero=True)(bond_class)
-
-    atom_mean = layers.Embedding(preprocessor.atom_classes, 1,
-                                 name='atom_mean', mask_zero=True)(atom_class)
-
-    def message_block(original_atom_state, original_bond_state, connectivity, i):
-
-        atom_state = layers.LayerNormalization()(original_atom_state)
-        bond_state = layers.LayerNormalization()(original_bond_state)
-
-        source_atom = nfp.Gather()([atom_state, nfp.Slice(np.s_[:, :, 1])(connectivity)])
-        target_atom = nfp.Gather()([atom_state, nfp.Slice(np.s_[:, :, 0])(connectivity)])
-
-        # Edge update network
-        new_bond_state = layers.Concatenate(name='concat_{}'.format(i))(
-            [source_atom, target_atom, bond_state])
-        new_bond_state = layers.Dense(
-            2*atom_features, activation='relu')(new_bond_state)
-        new_bond_state = layers.Dense(atom_features)(new_bond_state)
-
-        bond_state = layers.Add()([original_bond_state, new_bond_state])
-
-        # message function
-        source_atom = layers.Dense(atom_features)(source_atom)    
-        messages = layers.Multiply()([source_atom, bond_state])
-        messages = nfp.Reduce(reduction='sum')(
-            [messages, nfp.Slice(np.s_[:, :, 0])(connectivity), atom_state])
-
-        # state transition function
-        messages = layers.Dense(atom_features, activation='relu')(messages)
-        messages = layers.Dense(atom_features)(messages)
-
-        atom_state = layers.Add()([original_atom_state, messages])
-
-        return atom_state, bond_state
-
-    for i in range(num_messages):
-        atom_state, bond_state = message_block(atom_state, bond_state, connectivity, i)
-
-    atom_state = layers.Dense(1)(atom_state)
-    atom_state = layers.Add()([atom_state, atom_mean])
-    atom_state = AtomInfMask()(atom_state)
-
-    model = tf.keras.Model(input_tensors, atom_state)
 
     learning_rate = tf.keras.optimizers.schedules.InverseTimeDecay(1E-4, 1, 1E-5)
-    model.compile(loss=KLWithLogits(), optimizer=tf.keras.optimizers.Adam(learning_rate))
+    weight_decay  = tf.keras.optimizers.schedules.InverseTimeDecay(1E-5, 1, 1E-5)
+    
+    optimizer = tfa.optimizers.AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
+    
+    model.compile(loss={'spin': KLWithLogits(), 'bur_vol': nfp.masked_mean_absolute_error},
+                  loss_weights={'spin': 1, 'bur_vol': .1},
+                  optimizer=optimizer)
+    
+    model.summary()
 
-    model_name = '20200812_kl_divergence_faster_lr'
+    model_name = '20200825_combined_losses'
 
     if not os.path.exists(model_name):
         os.makedirs(model_name)
