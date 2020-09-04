@@ -10,4 +10,4 @@
 source ~/.bashrc
 conda activate /projects/rlmolecule/pstjohn/envs/tf2_gpu
 
-srun python train_model_redox.py
+srun python train_model_xfer_h2o_noinit.py

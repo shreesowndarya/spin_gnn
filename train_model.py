@@ -69,21 +69,15 @@ valid_dataset = tf.data.TFRecordDataset('tfrecords/valid.tfrecord.gz', compressi
 
 from model import build_embedding_model
 
-atom_embedding_model = build_embedding_model(preprocessor,
-                                             dropout=0.0,
-                                             atom_features=128,
-                                             num_messages=6,
-                                             num_heads=8,
-                                             name='atom_embedding_model')
+input_tensors, atom_states, bond_states, global_states = build_embedding_model(
+    preprocessor,
+    dropout=0.0,
+    atom_features=128,
+    num_messages=6,
+    num_heads=8,
+    name='atom_embedding_model')
 
-n_atom = layers.Input(shape=[], dtype=tf.int64, name='n_atom')
-atom_class = layers.Input(shape=[None], dtype=tf.int64, name='atom')
-bond_class = layers.Input(shape=[None], dtype=tf.int64, name='bond')
-connectivity = layers.Input(shape=[None, 2], dtype=tf.int64, name='connectivity')
-
-input_tensors = [atom_class, bond_class, connectivity, n_atom]
-
-atom_state, bond_state, global_state = atom_embedding_model(input_tensors)
+atom_class, bond_class, connectivity, n_atom = input_tensors
 
 spin_bias = layers.Embedding(preprocessor.atom_classes, 1,
                              name='spin_bias', mask_zero=True)(atom_class)
@@ -91,15 +85,14 @@ spin_bias = layers.Embedding(preprocessor.atom_classes, 1,
 bur_vol_bias =  layers.Embedding(preprocessor.atom_classes, 1,
                                  name='bur_vol_bias', mask_zero=True)(atom_class)
 
-spin_pred = layers.Dense(1)(atom_state)
+spin_pred = layers.Dense(1, name='spin_dense')(atom_states[-1])
 spin_pred = layers.Add()([spin_pred, spin_bias])
 spin_pred = AtomInfMask(name='spin')(spin_pred)
 
-bur_vol_pred = layers.Dense(1, name='bur_vol_dense')(atom_state)
+bur_vol_pred = layers.Dense(1, name='bur_vol_dense')(atom_states[-1])
 bur_vol_pred = layers.Add(name='bur_vol')([bur_vol_pred, bur_vol_bias])
 
 model = tf.keras.Model(input_tensors, [spin_pred, bur_vol_pred])
-
 
 if __name__ == "__main__":
 
@@ -115,7 +108,7 @@ if __name__ == "__main__":
     
     model.summary()
 
-    model_name = '20200825_combined_losses'
+    model_name = '20200901_combined_losses'
 
     if not os.path.exists(model_name):
         os.makedirs(model_name)

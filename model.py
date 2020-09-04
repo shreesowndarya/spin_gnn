@@ -1,7 +1,7 @@
 from tensorflow.keras import layers
 import tensorflow as tf
 
-from layers import EdgeUpdate, NodeUpdate, GlobalUpdate
+from nfp import EdgeUpdate, NodeUpdate, GlobalUpdate
 
 atom_features = 128
 num_messages = 6
@@ -37,20 +37,25 @@ def build_embedding_model(preprocessor,
 
     def message_block(atom_state, bond_state, connectivity, global_state, i):
 
-        bond_state = EdgeUpdate(dropout=dropout)([atom_state, bond_state, connectivity, global_state])
-        atom_state = NodeUpdate(dropout=dropout)([atom_state, bond_state, connectivity, global_state])
-        
-        # Don't do a global update on the final layer; pre-training doesn't use a global output
-        if i < num_messages - 1:
-            global_state = GlobalUpdate(head_features, num_heads, dropout=dropout)(
-                [atom_state, bond_state, connectivity, global_state])
+        bond_state = EdgeUpdate(dropout=dropout)([atom_state, bond_state, connectivity])
+        atom_state = NodeUpdate(dropout=dropout)([atom_state, bond_state, connectivity])
+        global_state = GlobalUpdate(head_features, num_heads, dropout=dropout)(
+            [atom_state, bond_state, connectivity, global_state])
 
         return atom_state, bond_state, global_state
 
+    atom_states = [atom_state]
+    bond_states = [bond_state]
+    global_states = [global_state]
+    
     for i in range(num_messages):
         atom_state, bond_state, global_state = message_block(
             atom_state, bond_state, connectivity, global_state, i)
 
-    atom_embedding_model = tf.keras.Model(input_tensors, [atom_state, bond_state, global_state], name=name)
+        atom_states += [atom_state]
+        bond_states += [bond_state]
+        global_states += [global_state]
+
+#    atom_embedding_model = tf.keras.Model(input_tensors, [atom_state, bond_state, global_state], name=name)
     
-    return atom_embedding_model
+    return input_tensors, atom_states, bond_states, global_states

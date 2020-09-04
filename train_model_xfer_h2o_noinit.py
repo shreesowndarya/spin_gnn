@@ -40,7 +40,7 @@ def parse_example(example):
     spin = parsed.pop('spin')
     bur_vol = parsed.pop('bur_vol')
     redox = parsed.pop('redox')    
-    targets = redox
+    targets = {'spin': spin, 'bur_vol': bur_vol, 'redox': redox}
     
     return parsed, targets
 
@@ -50,14 +50,13 @@ max_bonds = 100
 batch_size = 128
 
 # Here, we have to add the prediction target padding onto the input padding
-# Here, we have to add the prediction target padding onto the input padding
 padded_shapes = (preprocessor.padded_shapes(max_atoms=None, max_bonds=None),
-                 [None])
+                 {'spin': [None], 'bur_vol': [None], 'redox': [None]})
 
-padding_values = (preprocessor.padding_values, tf.constant(np.nan, dtype=tf.float64))
-#                   {'spin': tf.constant(np.nan, dtype=tf.float64),
-#                    'bur_vol': tf.constant(np.nan, dtype=tf.float64)})
-                   #'redox': tf.constant(np.nan, dtype=tf.float64)})
+padding_values = (preprocessor.padding_values,
+                  {'spin': tf.constant(np.nan, dtype=tf.float64),
+                   'bur_vol': tf.constant(np.nan, dtype=tf.float64),
+                   'redox': tf.constant(np.nan, dtype=tf.float64)})
 
 num_train = len(np.load('redf_split.npz', allow_pickle=True)['train'])
 
@@ -78,32 +77,36 @@ valid_dataset = tf.data.TFRecordDataset('tfrecords_redf/valid.tfrecord.gz', comp
     .prefetch(tf.data.experimental.AUTOTUNE)
 
 
-from train_model import model, atom_state, bond_state, connectivity, global_state
-from layers import GlobalUpdate
+from train_model import model, atom_states, bond_states, connectivity, global_states
 
-model.load_weights('20200825_combined_losses/best_model.hdf5')
-model.trainable = False
+# model.load_weights('20200901_combined_losses/best_model.hdf5')
 
-global_state = GlobalUpdate(16, 8)([atom_state, bond_state, connectivity, global_state])
+global_state = nfp.GlobalUpdate(16, 8)([atom_states[-1], bond_states[-1], connectivity, global_states[-1]])
 redox_pred = layers.Dense(2, name='redox')(global_state)
 
-redox_model = tf.keras.Model(model.inputs, redox_pred)
+redox_model = tf.keras.Model(model.inputs, model.outputs + [redox_pred])
 
 if __name__ == "__main__":
-
-    learning_rate = tf.keras.optimizers.schedules.InverseTimeDecay(1E-4, 1, 1E-5)
-    optimizer = tf.keras.optimizers.Adam(1E-2)
-    # weight_decay  = tf.keras.optimizers.schedules.InverseTimeDecay(1E-5, 1, 1E-5)
-    #
-    # optimizer = tfa.optimizers.AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
+   
+    # Freeze the spin and buried volume layers and train the redox prediction
+    
+    # model.trainable = False
+    learning_rate = tf.keras.optimizers.schedules.InverseTimeDecay(1E-3, 1, 1E-5)
+    weight_decay  = tf.keras.optimizers.schedules.InverseTimeDecay(1E-4, 1, 1E-5)
+    
+    optimizer = tfa.optimizers.AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
     
     redox_model.compile(
-        loss=nfp.masked_mean_absolute_error,
+        loss={'spin': KLWithLogits(),
+              'bur_vol': nfp.masked_mean_absolute_error,
+              'redox': nfp.masked_mean_absolute_error},
+        loss_weights={'spin': 0., 'bur_vol': 0., 'redox': 1},
         optimizer=optimizer)
     
     redox_model.summary()
 
-    model_name = '20200831_just_redox_xfer_frozen'
+    model_name = '20200903_xfer_h2o_noinit'
+    print(model_name)
 
     if not os.path.exists(model_name):
         os.makedirs(model_name)
