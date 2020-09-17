@@ -17,9 +17,9 @@ if __name__ == '__main__':
     redf_bv = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/redf_buried_volume.csv.gz')
     redf = redf_spin.merge(redf_bv, on=['smiles', 'atom_index', 'atom_type'], how='left')
 
-    # Load redox properties
-    redf_redox = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/redf_redox.csv.gz')
-    redf_redox = redf_redox.set_index('smiles').reindex(redf.smiles.unique())    
+#     # Load redox properties
+#     redf_redox = pd.read_csv('/projects/rlmolecule/pstjohn/atom_spins/redf_redox.csv.gz')
+#     redf_redox = redf_redox.set_index('smiles').reindex(redf.smiles.unique())    
 
     # Get a shuffled list of unique SMILES
     redf_smiles = redf.smiles.unique()
@@ -43,7 +43,7 @@ if __name__ == '__main__':
             fractional_spin = spin.abs() / spin.abs().sum()
             input_dict['spin'] = fractional_spin.values
             input_dict['bur_vol'] = idf.bur_vol.values
-            input_dict['redox'] = redf_redox.loc[smiles].values
+#            input_dict['redox'] = redf_redox.loc[smiles].values
             
             assert len(fractional_spin.values) == input_dict['n_atom']
 
