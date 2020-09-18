@@ -82,7 +82,7 @@ if __name__ == "__main__":
     
     redox_model.summary()
 
-    model_name = '20200918_redox_atomwise'
+    model_name = '20200918_redox'
 
     if not os.path.exists(model_name):
         os.makedirs(model_name)
