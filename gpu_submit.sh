@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=cooptimasoot
+#SBATCH --account=bpms
 #SBATCH --time=2-00
 #SBATCH --qos=high
 #SBATCH --job-name=bde_new
@@ -10,4 +10,4 @@
 source ~/.bashrc
 conda activate /projects/rlmolecule/pstjohn/envs/tf2_gpu
 
-srun python train_model.py
+srun python train_model_noh.py
