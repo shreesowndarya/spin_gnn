@@ -7,10 +7,8 @@ from tqdm import tqdm
 from rdkit.Chem import MolFromSmiles, AddHs
 tqdm.pandas()
 
-# Since we're going to re-use the other model's weights, we have
-# to be sure that we're also using the same atom and bond classes
-from preprocess_inputs import preprocessor
-preprocessor.from_json('tfrecords/preprocessor.json')
+from preprocess_inputs_spin_bv import preprocessor
+preprocessor.from_json('tfrecords_spin_bv/preprocessor.json')
 
 redox_df = pd.read_csv('/projects/rlmolecule/pstjohn/spin_gnn/redox_data.csv.gz')
 

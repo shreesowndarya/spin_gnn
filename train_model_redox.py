@@ -7,8 +7,8 @@ from tensorflow.keras import layers
 
 import nfp
 
-from preprocess_inputs import preprocessor
-preprocessor.from_json('tfrecords/preprocessor.json')
+from preprocess_inputs_spin_bv import preprocessor
+preprocessor.from_json('tfrecords_spin_bv/preprocessor.json')
 
 from loss import AtomInfMask, KLWithLogits, RedoxAttention
 from model import build_embedding_model
@@ -73,7 +73,7 @@ redox_model = tf.keras.Model(input_tensors, output)
 if __name__ == "__main__":
 
     learning_rate = tf.keras.optimizers.schedules.InverseTimeDecay(1E-4, 1, 1E-5)
-    weight_decay  = tf.keras.optimizers.schedules.InverseTimeDecay(1E-5, 1, 1E-5)
+    weight_decay  = tf.keras.optimizers.schedules.InverseTimeDecay(1E-6, 1, 1E-5)
     optimizer = tfa.optimizers.AdamW(learning_rate=learning_rate, weight_decay=weight_decay) 
     
     redox_model.compile(
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     
     redox_model.summary()
 
-    model_name = '20200918_redox'
+    model_name = '20201013_redox'
 
     if not os.path.exists(model_name):
         os.makedirs(model_name)
