@@ -37,6 +37,52 @@ class KLWithLogits(LossFunctionWrapper):
             kl_with_logits,
             name=name,
             reduction=reduction)
+        
+        
+class RedoxAttention(layers.Layer):
+    def __init__(self, num_atom_classes, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_atom_classes = num_atom_classes
+        
+        self.attn_bias = layers.Embedding(num_atom_classes, 2, mask_zero=True)
+        self.redox_bias = layers.Embedding(num_atom_classes, 2, mask_zero=True)
+        
+        self.attn_dense = layers.Dense(2)
+        self.redox_dense = layers.Dense(2)        
+    
+        
+    def call(self, inputs, mask=None):
+        # inputs = [atom_class, atom_state]
+        
+        atom_class, atom_state = inputs
+        
+        attn_bias = self.attn_bias(atom_class)
+        redox_bias = self.redox_bias(atom_class)
+
+        attn_scores = self.attn_dense(atom_state)
+        redox_pred = self.redox_dense(atom_state)        
+
+
+        atom_mask = mask[1]
+        inf_mask = tf.where(
+            atom_mask, 
+            tf.zeros_like(atom_mask, dtype=attn_scores.dtype),
+            tf.ones_like(atom_mask, dtype=attn_scores.dtype) * attn_scores.dtype.min)            
+            
+
+        attn_scores = tf.nn.softmax(
+            attn_scores + attn_bias + tf.expand_dims(inf_mask, -1), axis=-2)
+        
+        redox_pred = redox_pred + redox_bias
+        batched_attention = tf.einsum('aik,aik->ak', attn_scores, redox_pred)
+        
+        return batched_attention
+        
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"num_atom_classes": self.num_atom_classes})
+        return config        
 
 # def masked_categorical_crossentropy_from_logits(y_true, y_pred):
 #     """ Mask nan values in y_true with zeros and replace y_pred predictions with -inf """
