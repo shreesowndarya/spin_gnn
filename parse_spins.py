@@ -10,7 +10,7 @@ dbparams = {
     'port': 5432,
     'host': 'yuma.hpc.nrel.gov',
     'user': 'bdeops',
-    'password': 'BD30ps99!',  # deleting the password from the repo
+    'password': '********',  # deleting the password from the repo
     'options': f'-c search_path=bde',
 }
 
